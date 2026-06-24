@@ -21,9 +21,9 @@
 extern crate alloc;
 
 use odra::prelude::*;
-use odra::{Address, Mapping, Var, U256};
 use odra_modules::access::{Ownable, AccessControl};
-use odra_modules::erc20::Erc20;
+use casper_types::U256;
+use odra::module::SubModule;
 
 // ── Roles ─────────────────────────────────────────────────────────────────────
 
@@ -101,8 +101,8 @@ const MAX_BATCH_SIZE: usize = 100;
 #[odra::module]
 pub struct SecurityToken {
     // ── Access ─────────────────────────────────────────────────────────────
-    ownable:        Ownable,
-    access_control: AccessControl,
+    ownable:        SubModule<Ownable>,
+    access_control: SubModule<AccessControl>,
 
     // ── Token metadata ──────────────────────────────────────────────────────
     name:           Var<String>,
@@ -138,8 +138,7 @@ impl SecurityToken {
         compliance:        Address,
         identity_registry: Address,
     ) {
-        self.ownable.init(owner);
-        self.access_control.init(owner);
+        self.ownable.module_mut().init(owner);
         self.name.set(name);
         self.symbol.set(symbol);
         self.decimals.set(decimals);
@@ -298,13 +297,13 @@ impl SecurityToken {
     // ── Upgrades ──────────────────────────────────────────────────────────────
 
     pub fn set_compliance(&mut self, new_compliance: Address) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         self.compliance.set(new_compliance);
         self.env().emit_event(ComplianceUpdated { new_compliance });
     }
 
     pub fn set_identity_registry(&mut self, new_registry: Address) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         self.identity_registry.set(new_registry);
         self.env().emit_event(IdentityRegistryUpdated { new_registry });
     }
@@ -312,25 +311,25 @@ impl SecurityToken {
     // ── Role management ───────────────────────────────────────────────────────
 
     pub fn add_agent(&mut self, agent: Address) {
-        self.ownable.assert_owner(&self.env().caller());
-        self.access_control.grant_role(&ROLE_AGENT, &agent);
+        self.ownable.module().assert_owner(&self.env().caller());
+        self.access_control.module_mut().grant_role(&ROLE_AGENT, &agent);
     }
 
     pub fn add_regulator(&mut self, regulator: Address) {
-        self.ownable.assert_owner(&self.env().caller());
-        self.access_control.grant_role(&ROLE_REGULATOR, &regulator);
+        self.ownable.module().assert_owner(&self.env().caller());
+        self.access_control.module_mut().grant_role(&ROLE_REGULATOR, &regulator);
     }
 
     pub fn remove_agent(&mut self, agent: Address) {
-        self.ownable.assert_owner(&self.env().caller());
-        self.access_control.revoke_role(&ROLE_AGENT, &agent);
+        self.ownable.module().assert_owner(&self.env().caller());
+        self.access_control.module_mut().revoke_role(&ROLE_AGENT, &agent);
     }
 
     // ── Config queries ────────────────────────────────────────────────────────
 
-    pub fn compliance(&self)         -> Address { self.compliance.get_or_default() }
-    pub fn identity_registry(&self)  -> Address { self.identity_registry.get_or_default() }
-    pub fn owner(&self)              -> Address { self.ownable.get_owner() }
+    pub fn compliance(&self)         -> Address { self.compliance.get().unwrap() }
+    pub fn identity_registry(&self)  -> Address { self.identity_registry.get().unwrap() }
+    pub fn owner(&self)              -> Address { self.ownable.module().get_owner() }
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
@@ -380,8 +379,8 @@ impl SecurityToken {
 
     fn assert_agent(&self) {
         let caller = self.env().caller();
-        if self.ownable.get_owner() != caller
-            && !self.access_control.has_role(&ROLE_AGENT, &caller)
+        if self.ownable.module().get_owner() != caller
+            && !self.access_control.module().has_role(&ROLE_AGENT, &caller)
         {
             self.env().revert(SecurityTokenError::NotAuthorized);
         }
@@ -389,8 +388,8 @@ impl SecurityToken {
 
     fn assert_regulator(&self) {
         let caller = self.env().caller();
-        if self.ownable.get_owner() != caller
-            && !self.access_control.has_role(&ROLE_REGULATOR, &caller)
+        if self.ownable.module().get_owner() != caller
+            && !self.access_control.module().has_role(&ROLE_REGULATOR, &caller)
         {
             self.env().revert(SecurityTokenError::NotAuthorized);
         }

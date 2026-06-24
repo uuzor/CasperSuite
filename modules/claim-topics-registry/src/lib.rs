@@ -12,8 +12,9 @@
 extern crate alloc;
 
 use odra::prelude::*;
-use odra::{Address, Mapping, Var};
+use odra::prelude::*;
 use odra_modules::access::Ownable;
+use odra::module::SubModule;
 
 // ── Events ────────────────────────────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ pub enum ClaimTopicsError {
 /// A Mapping<u64, bool> acts as an efficient on-chain set.
 #[odra::module]
 pub struct ClaimTopicsRegistry {
-    ownable:      Ownable,
+    ownable:      SubModule<Ownable>,
     topics:       Mapping<u64, bool>,
     topic_count:  Var<u64>,
 }
@@ -53,14 +54,14 @@ impl ClaimTopicsRegistry {
 
     /// Deploy with an initial owner (typically the fund operator).
     pub fn init(&mut self, owner: Address) {
-        self.ownable.init(owner);
+        self.ownable.module_mut().init(owner);
     }
 
     // ── Admin: add / remove topics ───────────────────────────────────────────
 
     /// Add a required claim topic. Emits [`ClaimTopicAdded`].
     pub fn add_claim_topic(&mut self, topic: u64) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         if self.topics.get(&topic).unwrap_or(false) {
             self.env().revert(ClaimTopicsError::TopicAlreadyExists);
         }
@@ -71,7 +72,7 @@ impl ClaimTopicsRegistry {
 
     /// Remove a required claim topic. Emits [`ClaimTopicRemoved`].
     pub fn remove_claim_topic(&mut self, topic: u64) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         if !self.topics.get(&topic).unwrap_or(false) {
             self.env().revert(ClaimTopicsError::TopicDoesNotExist);
         }
@@ -97,7 +98,7 @@ impl ClaimTopicsRegistry {
 
     /// Convenience: owner address.
     pub fn owner(&self) -> Address {
-        self.ownable.get_owner()
+        self.ownable.module().get_owner()
     }
 }
 

@@ -18,8 +18,9 @@
 extern crate alloc;
 
 use odra::prelude::*;
-use odra::{Address, Mapping, Var, U256};
 use odra_modules::access::Ownable;
+use casper_types::U256;
+use odra::module::SubModule;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -133,7 +134,7 @@ pub const TIMELOCK_DELAY: u64     = 2 * 86_400;
 
 #[odra::module]
 pub struct Governance {
-    ownable:        Ownable,
+    ownable:        SubModule<Ownable>,
 
     /// Address of the FundToken contract (used for voting weight snapshots).
     fund_token:     Var<Address>,
@@ -166,7 +167,7 @@ impl Governance {
         quorum_bps:          u64,    // e.g. 1000 = 10%
         proposal_threshold:  U256,   // min tokens to propose
     ) {
-        self.ownable.init(owner);
+        self.ownable.module_mut().init(owner);
         self.fund_token.set(fund_token);
         self.quorum_bps.set(quorum_bps);
         self.proposal_threshold.set(proposal_threshold);
@@ -193,7 +194,7 @@ impl Governance {
         }
 
         let period = voting_period_seconds.max(MIN_VOTING_PERIOD);
-        let now    = self.env().block_time();
+        let now    = self.env().get_block_time();
         let quorum = Self::calculate_quorum(token_supply_snapshot, self.quorum_bps.get_or_default());
 
         let id = self.proposal_count.get_or_default();
@@ -252,7 +253,7 @@ impl Governance {
         }
 
         let mut proposal = self.get_active_proposal(proposal_id);
-        let now = self.env().block_time();
+        let now = self.env().get_block_time();
         if now > proposal.voting_ends {
             self.env().revert(GovernanceError::VotingEnded);
         }
@@ -287,7 +288,7 @@ impl Governance {
     /// Marks as Succeeded or Defeated and emits for CSPR.fans.
     pub fn finalise_proposal(&mut self, proposal_id: u64) {
         let mut proposal = self.get_active_proposal(proposal_id);
-        let now = self.env().block_time();
+        let now = self.env().get_block_time();
         if now <= proposal.voting_ends {
             self.env().revert(GovernanceError::VotingNotEnded);
         }
@@ -310,7 +311,7 @@ impl Governance {
             ProposalState::Succeeded => {}
             _ => self.env().revert(GovernanceError::ProposalNotSucceeded),
         }
-        let eta = self.env().block_time() + TIMELOCK_DELAY;
+        let eta = self.env().get_block_time() + TIMELOCK_DELAY;
         proposal.state       = ProposalState::Queued;
         proposal.timelock_eta = eta;
         self.proposals.set(&proposal_id, proposal);
@@ -319,13 +320,13 @@ impl Governance {
 
     /// Execute a Queued proposal after timelock has expired.
     pub fn execute_proposal(&mut self, proposal_id: u64) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         let mut proposal = self.get_proposal(proposal_id);
         match proposal.state {
             ProposalState::Queued => {}
             _ => self.env().revert(GovernanceError::ProposalNotQueued),
         }
-        if self.env().block_time() < proposal.timelock_eta {
+        if self.env().get_block_time() < proposal.timelock_eta {
             self.env().revert(GovernanceError::TimelockNotExpired);
         }
         proposal.state = ProposalState::Executed;
@@ -338,7 +339,7 @@ impl Governance {
     pub fn cancel_proposal(&mut self, proposal_id: u64) {
         let caller   = self.env().caller();
         let proposal_ref = self.get_proposal(proposal_id);
-        if caller != self.ownable.get_owner() && caller != proposal_ref.proposer {
+        if caller != self.ownable.module().get_owner() && caller != proposal_ref.proposer {
             self.env().revert(GovernanceError::Unauthorized);
         }
         let mut proposal = proposal_ref;
@@ -394,12 +395,12 @@ impl Governance {
     // ── Admin ─────────────────────────────────────────────────────────────────
 
     pub fn set_quorum_bps(&mut self, bps: u64) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         self.quorum_bps.set(bps);
     }
 
     pub fn set_proposal_threshold(&mut self, threshold: U256) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         self.proposal_threshold.set(threshold);
     }
 

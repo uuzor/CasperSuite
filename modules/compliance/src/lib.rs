@@ -22,8 +22,9 @@
 extern crate alloc;
 
 use odra::prelude::*;
-use odra::{Address, Mapping, Var};
+use odra::prelude::*;
 use odra_modules::access::Ownable;
+use odra::module::SubModule;
 
 // ── Configuration types ───────────────────────────────────────────────────────
 
@@ -31,6 +32,7 @@ use odra_modules::access::Ownable;
 pub type CountryCode = String;
 
 #[odra::odra_type]
+#[derive(Default)]
 pub struct ComplianceConfig {
     /// Countries that are BLOCKED from participating (OFAC, FATF, etc.).
     /// Stored as a comma-separated string to avoid Vec-of-Vec ABI issues.
@@ -101,7 +103,7 @@ pub enum ComplianceError {
 
 #[odra::module]
 pub struct Compliance {
-    ownable:           Ownable,
+    ownable:           SubModule<Ownable>,
     /// Address of the deployed IdentityRegistry contract.
     identity_registry: Var<Address>,
     /// Compliance rule set.
@@ -131,7 +133,7 @@ impl Compliance {
         max_investors:      u64,
         required_topics:    String, // e.g. "1,2,3"
     ) {
-        self.ownable.init(owner);
+        self.ownable.module_mut().init(owner);
         self.identity_registry.set(identity_registry);
         self.config.set(ComplianceConfig {
             blocked_countries:  String::new(),
@@ -187,7 +189,7 @@ impl Compliance {
 
         // ── Holding period ────────────────────────────────────────────────────
         if config.min_holding_period > 0 {
-            let now = self.env().block_time();
+            let now = self.env().get_block_time();
             if let Some(first) = self.first_received_at.get(&from) {
                 if now.saturating_sub(first) < config.min_holding_period {
                     self.emit_blocked(from, to, "HOLDING_PERIOD");
@@ -220,7 +222,7 @@ impl Compliance {
     /// Called by the token contract AFTER a successful transfer to update
     /// investor tracking state.
     pub fn transferred(&mut self, from: Address, to: Address, amount: u64) {
-        let now = self.env().block_time();
+        let now = self.env().get_block_time();
 
         // Update receiver
         let receiver_old = self.investor_balance.get(&to).unwrap_or(0);
@@ -231,8 +233,10 @@ impl Compliance {
         self.investor_balance.set(&to, receiver_old + amount);
 
         // Update sender (skip for mint, from == zero address)
-        let zero = Address::default();
-        if from != zero {
+        // Zero address check: all bytes of the address value are 0
+        let from_value = from.value();
+        let is_zero_address = from_value.iter().all(|&b| b == 0);
+        if !is_zero_address {
             let sender_old = self.investor_balance.get(&from).unwrap_or(0);
             let sender_new = sender_old.saturating_sub(amount);
             self.investor_balance.set(&from, sender_new);
@@ -248,19 +252,19 @@ impl Compliance {
     // ── Jurisdictional controls ───────────────────────────────────────────────
 
     pub fn block_country(&mut self, country: CountryCode) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         self.blocked_map.set(&country, true);
         self.env().emit_event(CountryBlocked { country });
     }
 
     pub fn unblock_country(&mut self, country: CountryCode) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         self.blocked_map.set(&country, false);
         self.env().emit_event(CountryUnblocked { country });
     }
 
     pub fn allow_country(&mut self, country: CountryCode) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         if !self.allowed_map.get(&country).unwrap_or(false) {
             self.allowed_map.set(&country, true);
             self.allowed_count.set(self.allowed_count.get_or_default() + 1);
@@ -269,7 +273,7 @@ impl Compliance {
     }
 
     pub fn disallow_country(&mut self, country: CountryCode) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         if self.allowed_map.get(&country).unwrap_or(false) {
             self.allowed_map.set(&country, false);
             let c = self.allowed_count.get_or_default();
@@ -293,7 +297,7 @@ impl Compliance {
     // ── Pause ─────────────────────────────────────────────────────────────────
 
     pub fn pause(&mut self) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         let mut cfg = self.config.get_or_default();
         cfg.paused = true;
         self.config.set(cfg);
@@ -301,7 +305,7 @@ impl Compliance {
     }
 
     pub fn unpause(&mut self) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         let mut cfg = self.config.get_or_default();
         cfg.paused = false;
         self.config.set(cfg);
@@ -311,7 +315,7 @@ impl Compliance {
     // ── Config setters ────────────────────────────────────────────────────────
 
     pub fn set_holding_period(&mut self, seconds: u64) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         let mut cfg = self.config.get_or_default();
         cfg.min_holding_period = seconds;
         self.config.set(cfg);
@@ -319,7 +323,7 @@ impl Compliance {
     }
 
     pub fn set_max_investors(&mut self, max: u64) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         let mut cfg = self.config.get_or_default();
         cfg.max_investors = max;
         self.config.set(cfg);
@@ -392,7 +396,7 @@ mod tests {
         let alice = env.get_account(1);
         let bob   = env.get_account(2);
         // Seed balances for tracking
-        contract.transferred(Address::default(), alice, 1_000);
+        contract.transferred(Address::zero(), alice, 1_000);
         let result = contract.can_transfer(alice, bob, 100);
         assert!(result);
     }
@@ -410,7 +414,7 @@ mod tests {
         let (env, mut contract) = setup();
         let alice = env.get_account(1);
         let bob   = env.get_account(2);
-        contract.transferred(Address::default(), alice, 500);
+        contract.transferred(Address::zero(), alice, 500);
         contract.pause();
         assert!(!contract.can_transfer(alice, bob, 100));
         contract.unpause();
@@ -432,7 +436,7 @@ mod tests {
         let (env, mut contract) = setup();
         let alice = env.get_account(1);
         let bob   = env.get_account(2);
-        contract.transferred(Address::default(), alice, 1_000);
+        contract.transferred(Address::zero(), alice, 1_000);
         assert_eq!(contract.investor_count(), 1);
         contract.transferred(alice, bob, 500);
         assert_eq!(contract.investor_count(), 2);

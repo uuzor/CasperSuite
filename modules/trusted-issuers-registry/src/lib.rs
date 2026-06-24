@@ -15,8 +15,9 @@
 extern crate alloc;
 
 use odra::prelude::*;
-use odra::{Address, Mapping, Var};
+use odra::prelude::*;
 use odra_modules::access::Ownable;
+use odra::module::SubModule;
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
@@ -66,7 +67,7 @@ pub enum TrustedIssuersError {
 
 #[odra::module]
 pub struct TrustedIssuersRegistry {
-    ownable:      Ownable,
+    ownable:      SubModule<Ownable>,
     /// issuer_address → TrustedIssuer record
     issuers:      Mapping<Address, TrustedIssuer>,
     issuer_count: Var<u64>,
@@ -77,14 +78,14 @@ impl TrustedIssuersRegistry {
     // ── Constructor ──────────────────────────────────────────────────────────
 
     pub fn init(&mut self, owner: Address) {
-        self.ownable.init(owner);
+        self.ownable.module_mut().init(owner);
     }
 
     // ── Admin ────────────────────────────────────────────────────────────────
 
     /// Register a new trusted issuer with an initial set of claim topics.
     pub fn add_trusted_issuer(&mut self, issuer: Address, claim_topics: Vec<u64>) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         self.validate_topics(&claim_topics);
 
         if let Some(existing) = self.issuers.get(&issuer) {
@@ -107,7 +108,7 @@ impl TrustedIssuersRegistry {
 
     /// Deactivate an issuer (soft-delete preserves history).
     pub fn remove_trusted_issuer(&mut self, issuer: Address) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         let mut record = self.get_active_issuer(issuer);
         record.active = false;
         self.issuers.set(&issuer, record);
@@ -120,7 +121,7 @@ impl TrustedIssuersRegistry {
 
     /// Update the claim topics an existing issuer is trusted for.
     pub fn update_issuer_claim_topics(&mut self, issuer: Address, claim_topics: Vec<u64>) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         self.validate_topics(&claim_topics);
         let mut record = self.get_active_issuer(issuer);
         record.claim_topics = claim_topics.clone();
@@ -157,7 +158,7 @@ impl TrustedIssuersRegistry {
     }
 
     pub fn owner(&self) -> Address {
-        self.ownable.get_owner()
+        self.ownable.module().get_owner()
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
