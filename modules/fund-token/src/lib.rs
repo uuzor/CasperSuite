@@ -20,8 +20,9 @@
 extern crate alloc;
 
 use odra::prelude::*;
-use odra::{Address, Mapping, Var, U256};
 use odra_modules::access::Ownable;
+use casper_types::U256;
+use odra::module::SubModule;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -61,6 +62,19 @@ pub struct NavRecord {
     pub total_nav:     u64,  // Total fund NAV in USD cents
     pub posted_at:     u64,  // Block timestamp
     pub posted_by:     Address,
+}
+
+impl Default for NavRecord {
+    fn default() -> Self {
+        NavRecord {
+            nav_per_token: 0,
+            total_nav: 0,
+            posted_at: 0,
+            posted_by: Address::new(
+                "account-hash-0000000000000000000000000000000000000000000000000000000000000000"
+            ).unwrap(),
+        }
+    }
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────
@@ -156,7 +170,7 @@ const ROLE_FUND_ADMIN: [u8; 32] = *b"FUND_ADMIN\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\
 
 #[odra::module]
 pub struct FundToken {
-    ownable:       Ownable,
+    ownable:       SubModule<Ownable>,
 
     // ── Token state ──────────────────────────────────────────────────────────
     name:          Var<String>,
@@ -169,7 +183,7 @@ pub struct FundToken {
     // ── Fund metadata ─────────────────────────────────────────────────────────
     fund_name:     Var<String>,
     fund_manager:  Var<String>,
-    vintage_year:  Var<u16>,
+    vintage_year:  Var<u32>,
     strategy:      Var<String>,   // "VENTURE" | "PRIVATE_EQUITY" | "HYBRID"
     fund_closed:   Var<bool>,
 
@@ -212,12 +226,12 @@ impl FundToken {
         symbol:            String,
         fund_name:         String,
         fund_manager:      String,
-        vintage_year:      u16,
+        vintage_year:      u32,
         strategy:          String,
         compliance:        Address,
         identity_registry: Address,
     ) {
-        self.ownable.init(owner);
+        self.ownable.module_mut().init(owner);
         self.name.set(name);
         self.symbol.set(symbol);
         self.decimals.set(6);
@@ -239,7 +253,7 @@ impl FundToken {
         if nav_per_token == 0 {
             self.env().revert(FundTokenError::InvalidNav);
         }
-        let now = self.env().block_time();
+        let now = self.env().get_block_time();
         let caller = self.env().caller();
         self.latest_nav.set(NavRecord {
             nav_per_token,
@@ -267,7 +281,7 @@ impl FundToken {
             self.env().revert(FundTokenError::ZeroAmount);
         }
         let investor  = self.env().caller();
-        let now       = self.env().block_time();
+        let now       = self.env().get_block_time();
         let id        = self.subscription_count.get_or_default();
         self.subscriptions.set(
             &id,
@@ -338,7 +352,7 @@ impl FundToken {
         if balance.saturating_sub(frozen) < token_amount {
             self.env().revert(FundTokenError::InsufficientBalance);
         }
-        let now = self.env().block_time();
+        let now = self.env().get_block_time();
         let id  = self.redemption_count.get_or_default();
         self.redemptions.set(
             &id,
@@ -404,7 +418,7 @@ impl FundToken {
     ) -> u64 {
         self.assert_fund_admin();
         let id = self.proposal_count.get_or_default();
-        let now = self.env().block_time();
+        let now = self.env().get_block_time();
         // 86_400 seconds per day
         let voting_ends = now + voting_days * 86_400;
         self.proposal_count.set(id + 1);
@@ -426,7 +440,7 @@ impl FundToken {
     pub fn fund_name(&self)    -> String { self.fund_name.get_or_default() }
     pub fn fund_manager(&self) -> String { self.fund_manager.get_or_default() }
     pub fn strategy(&self)     -> String { self.strategy.get_or_default() }
-    pub fn vintage_year(&self) -> u16    { self.vintage_year.get_or_default() }
+    pub fn vintage_year(&self) -> u32    { self.vintage_year.get_or_default() }
     pub fn is_closed(&self)    -> bool   { self.fund_closed.get_or_default() }
 
     pub fn balance_of(&self, account: Address) -> U256 {
@@ -461,12 +475,12 @@ impl FundToken {
     // ── Admin ─────────────────────────────────────────────────────────────────
 
     pub fn add_fund_admin(&mut self, admin: Address) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         self.fund_admins.set(&admin, true);
     }
 
     pub fn remove_fund_admin(&mut self, admin: Address) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         self.fund_admins.set(&admin, false);
     }
 
@@ -533,7 +547,7 @@ impl FundToken {
 
     fn assert_fund_admin(&self) {
         let caller = self.env().caller();
-        if self.ownable.get_owner() != caller
+        if self.ownable.module().get_owner() != caller
             && !self.fund_admins.get(&caller).unwrap_or(false)
         {
             self.env().revert(FundTokenError::NotAuthorized);

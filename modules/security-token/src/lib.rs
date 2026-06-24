@@ -21,9 +21,9 @@
 extern crate alloc;
 
 use odra::prelude::*;
-use odra::{Address, Mapping, Var, U256};
 use odra_modules::access::{Ownable, AccessControl};
-use odra_modules::erc20::Erc20;
+use casper_types::U256;
+use odra::module::SubModule;
 
 // ── Roles ─────────────────────────────────────────────────────────────────────
 
@@ -31,6 +31,20 @@ pub const ROLE_AGENT: [u8; 32]      = *b"AGENT\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0
 pub const ROLE_REGULATOR: [u8; 32]  = *b"REGULATOR\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
 
 // ── Events ────────────────────────────────────────────────────────────────────
+
+#[odra::event]
+pub struct Transfer {
+    pub from:    Option<Address>,
+    pub to:      Option<Address>,
+    pub amount:  U256,
+}
+
+#[odra::event]
+pub struct Approval {
+    pub owner:   Address,
+    pub spender: Address,
+    pub amount:  U256,
+}
 
 #[odra::event]
 pub struct TokensMinted {
@@ -84,25 +98,27 @@ pub struct IdentityRegistryUpdated {
 
 #[odra::odra_error]
 pub enum SecurityTokenError {
-    NotAuthorized             = 5_000,
-    AddressFrozen             = 5_001,
-    InsufficientUnfrozenBalance = 5_002,
-    TransferNotCompliant      = 5_003,
-    ZeroAddress               = 5_004,
-    InvalidAmount             = 5_005,
-    BatchLengthMismatch       = 5_006,
-    BatchTooLarge             = 5_007,
+    NotAuthorized                = 5_000,
+    AddressFrozen                = 5_001,
+    InsufficientUnfrozenBalance  = 5_002,
+    TransferNotCompliant          = 5_003,
+    ZeroAddress                   = 5_004,
+    InvalidAmount                 = 5_005,
+    BatchLengthMismatch           = 5_006,
+    BatchTooLarge                 = 5_007,
+    InsufficientBalance           = 5_008,
+    InsufficientAllowance        = 5_009,
 }
 
 // ── Module ────────────────────────────────────────────────────────────────────
 
 const MAX_BATCH_SIZE: usize = 100;
 
-#[odra::module]
+#[odra::module(events = [Transfer, Approval, TokensMinted, TokensBurned, ForcedTransfer, AddressFrozen, TokensFrozen, TokensUnfrozen, ComplianceUpdated, IdentityRegistryUpdated])]
 pub struct SecurityToken {
     // ── Access ─────────────────────────────────────────────────────────────
-    ownable:        Ownable,
-    access_control: AccessControl,
+    ownable:        SubModule<Ownable>,
+    access_control: SubModule<AccessControl>,
 
     // ── Token metadata ──────────────────────────────────────────────────────
     name:           Var<String>,
@@ -138,8 +154,9 @@ impl SecurityToken {
         compliance:        Address,
         identity_registry: Address,
     ) {
-        self.ownable.init(owner);
-        self.access_control.init(owner);
+        self.ownable.module_mut().init(owner);
+        // Grant owner the DEFAULT_ADMIN_ROLE so they can manage AGENT and REGULATOR roles
+        self.access_control.module_mut().unchecked_grant_role(&odra_modules::access::DEFAULT_ADMIN_ROLE, &owner);
         self.name.set(name);
         self.symbol.set(symbol);
         self.decimals.set(decimals);
@@ -181,6 +198,7 @@ impl SecurityToken {
     pub fn approve(&mut self, spender: Address, amount: U256) {
         let owner = self.env().caller();
         self.allowances.set(&(owner, spender), amount);
+        self.env().emit_event(Approval { owner, spender, amount });
     }
 
     // ── Compliant transfer ────────────────────────────────────────────────────
@@ -298,13 +316,13 @@ impl SecurityToken {
     // ── Upgrades ──────────────────────────────────────────────────────────────
 
     pub fn set_compliance(&mut self, new_compliance: Address) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         self.compliance.set(new_compliance);
         self.env().emit_event(ComplianceUpdated { new_compliance });
     }
 
     pub fn set_identity_registry(&mut self, new_registry: Address) {
-        self.ownable.assert_owner(&self.env().caller());
+        self.ownable.module().assert_owner(&self.env().caller());
         self.identity_registry.set(new_registry);
         self.env().emit_event(IdentityRegistryUpdated { new_registry });
     }
@@ -312,25 +330,25 @@ impl SecurityToken {
     // ── Role management ───────────────────────────────────────────────────────
 
     pub fn add_agent(&mut self, agent: Address) {
-        self.ownable.assert_owner(&self.env().caller());
-        self.access_control.grant_role(&ROLE_AGENT, &agent);
+        self.ownable.module().assert_owner(&self.env().caller());
+        self.access_control.module_mut().grant_role(&ROLE_AGENT, &agent);
     }
 
     pub fn add_regulator(&mut self, regulator: Address) {
-        self.ownable.assert_owner(&self.env().caller());
-        self.access_control.grant_role(&ROLE_REGULATOR, &regulator);
+        self.ownable.module().assert_owner(&self.env().caller());
+        self.access_control.module_mut().grant_role(&ROLE_REGULATOR, &regulator);
     }
 
     pub fn remove_agent(&mut self, agent: Address) {
-        self.ownable.assert_owner(&self.env().caller());
-        self.access_control.revoke_role(&ROLE_AGENT, &agent);
+        self.ownable.module().assert_owner(&self.env().caller());
+        self.access_control.module_mut().revoke_role(&ROLE_AGENT, &agent);
     }
 
     // ── Config queries ────────────────────────────────────────────────────────
 
-    pub fn compliance(&self)         -> Address { self.compliance.get_or_default() }
-    pub fn identity_registry(&self)  -> Address { self.identity_registry.get_or_default() }
-    pub fn owner(&self)              -> Address { self.ownable.get_owner() }
+    pub fn compliance(&self)         -> Address { self.compliance.get().unwrap() }
+    pub fn identity_registry(&self)  -> Address { self.identity_registry.get().unwrap() }
+    pub fn owner(&self)              -> Address { self.ownable.module().get_owner() }
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
@@ -354,6 +372,7 @@ impl SecurityToken {
         self.deduct_balance(from, amount);
         let to_bal = self.balances.get(&to).unwrap_or_default();
         self.balances.set(&to, to_bal + amount);
+        self.env().emit_event(Transfer { from: Some(from), to: Some(to), amount });
     }
 
     fn do_mint(&mut self, to: Address, amount: U256) {
@@ -380,8 +399,8 @@ impl SecurityToken {
 
     fn assert_agent(&self) {
         let caller = self.env().caller();
-        if self.ownable.get_owner() != caller
-            && !self.access_control.has_role(&ROLE_AGENT, &caller)
+        if self.ownable.module().get_owner() != caller
+            && !self.access_control.module().has_role(&ROLE_AGENT, &caller)
         {
             self.env().revert(SecurityTokenError::NotAuthorized);
         }
@@ -389,8 +408,8 @@ impl SecurityToken {
 
     fn assert_regulator(&self) {
         let caller = self.env().caller();
-        if self.ownable.get_owner() != caller
-            && !self.access_control.has_role(&ROLE_REGULATOR, &caller)
+        if self.ownable.module().get_owner() != caller
+            && !self.access_control.module().has_role(&ROLE_REGULATOR, &caller)
         {
             self.env().revert(SecurityTokenError::NotAuthorized);
         }
@@ -406,17 +425,18 @@ mod tests {
     use odra_test::env;
 
     fn setup() -> (HostEnv, SecurityTokenHostRef) {
-        let test_env   = env();
-        let owner      = test_env.get_account(0);
+        let test_env = env();
+        let owner = test_env.get_account(0);
         let compliance = test_env.get_account(8);
-        let registry   = test_env.get_account(9);
-        let contract   = SecurityTokenHostRef::deploy(
+        let registry = test_env.get_account(9);
+        // Deploy using the main contract struct - deploy() returns HostRef
+        let contract = SecurityToken::deploy(
             &test_env,
             SecurityTokenInitArgs {
                 owner,
-                name:              "Nigeria VC Fund I".into(),
-                symbol:            "NGVC1".into(),
-                decimals:          6,
+                name: "Nigeria VC Fund I".into(),
+                symbol: "NGVC1".into(),
+                decimals: 6,
                 compliance,
                 identity_registry: registry,
             },
@@ -424,83 +444,509 @@ mod tests {
         (test_env, contract)
     }
 
+    // ── Metadata Tests ─────────────────────────────────────────────────────────
+
     #[test]
     fn metadata() {
         let (_env, contract) = setup();
-        assert_eq!(contract.name(),     "Nigeria VC Fund I");
-        assert_eq!(contract.symbol(),   "NGVC1");
+        assert_eq!(contract.name(), "Nigeria VC Fund I");
+        assert_eq!(contract.symbol(), "NGVC1");
         assert_eq!(contract.decimals(), 6);
     }
 
     #[test]
-    fn mint_and_balance() {
+    fn initial_supply_is_zero() {
+        let (_env, contract) = setup();
+        assert_eq!(contract.total_supply(), U256::zero());
+    }
+
+    // ── Minting Tests ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn mint_increases_balance_and_supply() {
         let (env, mut contract) = setup();
         let alice = env.get_account(1);
         contract.mint(alice, U256::from(1_000_000u64));
         assert_eq!(contract.balance_of(alice), U256::from(1_000_000u64));
-        assert_eq!(contract.total_supply(),    U256::from(1_000_000u64));
+        assert_eq!(contract.total_supply(), U256::from(1_000_000u64));
     }
+
+    #[test]
+    fn mint_multiple_times() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        contract.mint(alice, U256::from(500u64));
+        contract.mint(alice, U256::from(300u64));
+        assert_eq!(contract.balance_of(alice), U256::from(800u64));
+        assert_eq!(contract.total_supply(), U256::from(800u64));
+    }
+
+    #[test]
+    fn mint_emits_tokens_minted_event() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        contract.mint(alice, U256::from(1000u64));
+        assert!(env.emitted_event(
+            &contract,
+            TokensMinted {
+                to: alice,
+                amount: U256::from(1000u64),
+            }
+        ));
+    }
+
+    // ── Transfer Tests ─────────────────────────────────────────────────────────
 
     #[test]
     fn transfer_reduces_sender_balance() {
         let (env, mut contract) = setup();
         let alice = env.get_account(1);
-        let bob   = env.get_account(2);
+        let bob = env.get_account(2);
         contract.mint(alice, U256::from(1_000u64));
+
         // Switch caller to alice
-        let test_env = env.clone();
-        test_env.set_caller(alice);
+        env.set_caller(alice);
         contract.transfer(bob, U256::from(400u64));
+
         assert_eq!(contract.balance_of(alice), U256::from(600u64));
-        assert_eq!(contract.balance_of(bob),   U256::from(400u64));
+        assert_eq!(contract.balance_of(bob), U256::from(400u64));
     }
 
     #[test]
-    fn freeze_blocks_transfer() {
+    fn transfer_emits_transfer_event() {
         let (env, mut contract) = setup();
         let alice = env.get_account(1);
-        let bob   = env.get_account(2);
+        let bob = env.get_account(2);
+        contract.mint(alice, U256::from(1_000u64));
+
+        env.set_caller(alice);
+        contract.transfer(bob, U256::from(400u64));
+
+        // Check Transfer event
+        assert!(env.emitted_event(
+            &contract,
+            Transfer {
+                from: Some(alice),
+                to: Some(bob),
+                amount: U256::from(400u64),
+            }
+        ));
+    }
+
+    #[test]
+    fn transfer_insufficient_balance_reverts() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        let bob = env.get_account(2);
+        contract.mint(alice, U256::from(100u64));
+
+        env.set_caller(alice);
+        let result = contract.try_transfer(bob, U256::from(200u64));
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), SecurityTokenError::InsufficientUnfrozenBalance.into());
+    }
+
+    #[test]
+    fn transfer_zero_amount() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        let bob = env.get_account(2);
+        contract.mint(alice, U256::from(1000u64));
+
+        env.set_caller(alice);
+        contract.transfer(bob, U256::zero());
+
+        assert_eq!(contract.balance_of(alice), U256::from(1000u64));
+        assert_eq!(contract.balance_of(bob), U256::zero());
+    }
+
+    // ── Allowances Tests ───────────────────────────────────────────────────────
+
+    #[test]
+    fn approve_sets_allowance() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        let bob = env.get_account(2);
+        contract.mint(alice, U256::from(1000u64));
+
+        env.set_caller(alice);
+        contract.approve(bob, U256::from(500u64));
+
+        assert_eq!(contract.allowance(alice, bob), U256::from(500u64));
+    }
+
+    #[test]
+    fn approve_emits_approval_event() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        let bob = env.get_account(2);
+
+        env.set_caller(alice);
+        contract.approve(bob, U256::from(500u64));
+
+        assert!(env.emitted_event(
+            &contract,
+            Approval {
+                owner: alice,
+                spender: bob,
+                amount: U256::from(500u64),
+            }
+        ));
+    }
+
+    #[test]
+    fn transfer_from_uses_allowance() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        let bob = env.get_account(2);
+        let charlie = env.get_account(3);
+        contract.mint(alice, U256::from(1000u64));
+
+        // Alice approves Bob
+        env.set_caller(alice);
+        contract.approve(bob, U256::from(500u64));
+
+        // Bob transfers from Alice to Charlie
+        env.set_caller(bob);
+        contract.transfer_from(alice, charlie, U256::from(300u64));
+
+        assert_eq!(contract.balance_of(charlie), U256::from(300u64));
+        assert_eq!(contract.allowance(alice, bob), U256::from(200u64)); // 500 - 300 = 200
+    }
+
+    #[test]
+    fn transfer_from_insufficient_allowance_reverts() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        let bob = env.get_account(2);
+        let charlie = env.get_account(3);
+        contract.mint(alice, U256::from(1000u64));
+
+        env.set_caller(alice);
+        contract.approve(bob, U256::from(100u64));
+
+        env.set_caller(bob);
+        let result = contract.try_transfer_from(alice, charlie, U256::from(200u64));
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), SecurityTokenError::NotAuthorized.into());
+    }
+
+    // ── Burn Tests ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn burn_reduces_supply_and_balance() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        contract.mint(alice, U256::from(1000u64));
+        contract.burn(alice, U256::from(500u64));
+
+        assert_eq!(contract.balance_of(alice), U256::from(500u64));
+        assert_eq!(contract.total_supply(), U256::from(500u64));
+    }
+
+    #[test]
+    fn burn_emits_tokens_burned_event() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        contract.mint(alice, U256::from(1000u64));
+        contract.burn(alice, U256::from(500u64));
+
+        assert!(env.emitted_event(
+            &contract,
+            TokensBurned {
+                from: alice,
+                amount: U256::from(500u64),
+            }
+        ));
+    }
+
+    #[test]
+    fn burn_insufficient_balance_reverts() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        contract.mint(alice, U256::from(100u64));
+
+        let result = contract.try_burn(alice, U256::from(200u64));
+        assert!(result.is_err());
+        // deduct_balance uses InvalidAmount, not InsufficientBalance
+        assert_eq!(result.unwrap_err(), SecurityTokenError::InvalidAmount.into());
+    }
+
+    // ── Freeze Tests ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn freeze_address() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
         contract.mint(alice, U256::from(500u64));
         contract.set_address_frozen(alice, true);
+
         assert!(contract.is_frozen(alice));
-        // Transfer should fail — tested via available_balance path
-        // In test env call it directly:
-        let avail = contract.available_balance(alice);
-        assert_eq!(avail, U256::from(500u64)); // balance exists but frozen flag set
+    }
+
+    #[test]
+    fn freeze_address_emits_event() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        contract.mint(alice, U256::from(500u64));
+        contract.set_address_frozen(alice, true);
+
+        assert!(env.emitted_event(
+            &contract,
+            AddressFrozen {
+                investor: alice,
+                frozen: true,
+            }
+        ));
     }
 
     #[test]
     fn partial_freeze() {
         let (env, mut contract) = setup();
         let alice = env.get_account(1);
-        contract.mint(alice, U256::from(1_000u64));
+        contract.mint(alice, U256::from(1000u64));
+
         contract.freeze_partial(alice, U256::from(300u64));
+
         assert_eq!(contract.frozen_tokens_of(alice), U256::from(300u64));
         assert_eq!(contract.available_balance(alice), U256::from(700u64));
-        contract.unfreeze_partial(alice, U256::from(300u64));
-        assert_eq!(contract.available_balance(alice), U256::from(1_000u64));
     }
+
+    #[test]
+    fn partial_freeze_emits_tokens_frozen_event() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        contract.mint(alice, U256::from(1000u64));
+        contract.freeze_partial(alice, U256::from(300u64));
+
+        assert!(env.emitted_event(
+            &contract,
+            TokensFrozen {
+                investor: alice,
+                amount: U256::from(300u64),
+            }
+        ));
+    }
+
+    #[test]
+    fn unfreeze_partial() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        contract.mint(alice, U256::from(1000u64));
+        contract.freeze_partial(alice, U256::from(300u64));
+        contract.unfreeze_partial(alice, U256::from(200u64));
+
+        assert_eq!(contract.frozen_tokens_of(alice), U256::from(100u64));
+        assert_eq!(contract.available_balance(alice), U256::from(900u64));
+    }
+
+    #[test]
+    fn unfreeze_partial_more_than_frozen() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        contract.mint(alice, U256::from(1000u64));
+        contract.freeze_partial(alice, U256::from(100u64));
+        contract.unfreeze_partial(alice, U256::from(200u64)); // unfreeze more than frozen
+
+        assert_eq!(contract.frozen_tokens_of(alice), U256::zero());
+        assert_eq!(contract.available_balance(alice), U256::from(1000u64));
+    }
+
+    // ── Forced Transfer Tests ─────────────────────────────────────────────────
 
     #[test]
     fn forced_transfer() {
         let (env, mut contract) = setup();
-        let alice    = env.get_account(1);
-        let bob      = env.get_account(2);
+        let alice = env.get_account(1);
+        let bob = env.get_account(2);
         let regulator = env.get_account(3);
-        contract.mint(alice, U256::from(1_000u64));
+        contract.mint(alice, U256::from(1000u64));
         contract.add_regulator(regulator);
+
         env.set_caller(regulator);
-        contract.forced_transfer(alice, bob, U256::from(1_000u64), "COURT_ORDER".into());
+        contract.forced_transfer(alice, bob, U256::from(1000u64), "COURT_ORDER".into());
+
         assert_eq!(contract.balance_of(alice), U256::zero());
-        assert_eq!(contract.balance_of(bob),   U256::from(1_000u64));
+        assert_eq!(contract.balance_of(bob), U256::from(1000u64));
     }
 
     #[test]
-    fn burn_reduces_supply() {
+    fn forced_transfer_emits_forced_transfer_event() {
         let (env, mut contract) = setup();
         let alice = env.get_account(1);
-        contract.mint(alice, U256::from(1_000u64));
-        contract.burn(alice, U256::from(500u64));
-        assert_eq!(contract.total_supply(), U256::from(500u64));
+        let bob = env.get_account(2);
+        let regulator = env.get_account(3);
+        contract.mint(alice, U256::from(1000u64));
+        contract.add_regulator(regulator);
+
+        env.set_caller(regulator);
+        contract.forced_transfer(alice, bob, U256::from(500u64), "COURT_ORDER".into());
+
+        assert!(env.emitted_event(
+            &contract,
+            ForcedTransfer {
+                from: alice,
+                to: bob,
+                amount: U256::from(500u64),
+                reason: "COURT_ORDER".into(),
+            }
+        ));
+    }
+
+    #[test]
+    fn forced_transfer_insufficient_balance_reverts() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        let bob = env.get_account(2);
+        let regulator = env.get_account(3);
+        contract.mint(alice, U256::from(100u64));
+        contract.add_regulator(regulator);
+
+        env.set_caller(regulator);
+        let result = contract.try_forced_transfer(alice, bob, U256::from(200u64), "COURT_ORDER".into());
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), SecurityTokenError::InvalidAmount.into());
+    }
+
+    #[test]
+    fn non_regulator_cannot_force_transfer() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        let bob = env.get_account(2);
+        let charlie = env.get_account(3); // not a regulator
+        contract.mint(alice, U256::from(1000u64));
+
+        env.set_caller(charlie);
+        let result = contract.try_forced_transfer(alice, bob, U256::from(500u64), "UNAUTHORIZED".into());
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), SecurityTokenError::NotAuthorized.into());
+    }
+
+    // ── Batch Mint Tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn batch_mint() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        let bob = env.get_account(2);
+        let charlie = env.get_account(3);
+
+        contract.batch_mint(
+            vec![alice, bob, charlie],
+            vec![U256::from(100u64), U256::from(200u64), U256::from(300u64)],
+        );
+
+        assert_eq!(contract.balance_of(alice), U256::from(100u64));
+        assert_eq!(contract.balance_of(bob), U256::from(200u64));
+        assert_eq!(contract.balance_of(charlie), U256::from(300u64));
+        assert_eq!(contract.total_supply(), U256::from(600u64));
+    }
+
+    #[test]
+    fn batch_mint_length_mismatch_reverts() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        let bob = env.get_account(2);
+
+        let result = contract.try_batch_mint(
+            vec![alice, bob],
+            vec![U256::from(100u64)], // only one amount for two recipients
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), SecurityTokenError::BatchLengthMismatch.into());
+    }
+
+    // ── Role Management Tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn add_and_remove_agent() {
+        let (env, mut contract) = setup();
+        let owner = env.get_account(0);
+        let agent = env.get_account(1);
+
+        // Owner adds agent
+        env.set_caller(owner);
+        contract.add_agent(agent);
+
+        // Owner removes agent
+        contract.remove_agent(agent);
+
+        // Verify by attempting mint (should work as owner)
+        contract.mint(agent, U256::from(100u64));
+        assert_eq!(contract.balance_of(agent), U256::from(100u64));
+    }
+
+    #[test]
+    fn non_owner_cannot_add_agent() {
+        let (env, mut contract) = setup();
+        let alice = env.get_account(1);
+        let bob = env.get_account(2);
+
+        // Alice (not owner) tries to add Bob as agent - should fail
+        env.set_caller(alice);
+        let result = contract.try_add_agent(bob);
+        assert!(result.is_err()); // Non-owner cannot add agents
+    }
+
+    #[test]
+    fn owner_can_add_regulator() {
+        let (env, mut contract) = setup();
+        let owner = env.get_account(0);
+        let regulator = env.get_account(1);
+
+        env.set_caller(owner);
+        contract.add_regulator(regulator);
+
+        // Regulator should now be able to force transfer
+        let alice = env.get_account(2);
+        let bob = env.get_account(3);
+        contract.mint(alice, U256::from(1000u64));
+
+        env.set_caller(regulator);
+        contract.forced_transfer(alice, bob, U256::from(500u64), "REGULATORY_ACTION".into());
+        assert_eq!(contract.balance_of(bob), U256::from(500u64));
+    }
+
+    // ── Compliance & Identity Registry Update Tests ────────────────────────────
+
+    #[test]
+    fn set_compliance_address() {
+        let (env, mut contract) = setup();
+        let owner = env.get_account(0);
+        let new_compliance = env.get_account(5);
+
+        env.set_caller(owner);
+        contract.set_compliance(new_compliance);
+
+        assert_eq!(contract.compliance(), new_compliance);
+    }
+
+    #[test]
+    fn set_identity_registry_address() {
+        let (env, mut contract) = setup();
+        let owner = env.get_account(0);
+        let new_registry = env.get_account(6);
+
+        env.set_caller(owner);
+        contract.set_identity_registry(new_registry);
+
+        assert_eq!(contract.identity_registry(), new_registry);
+    }
+
+    #[test]
+    fn set_compliance_emits_event() {
+        let (env, mut contract) = setup();
+        let owner = env.get_account(0);
+        let new_compliance = env.get_account(5);
+
+        env.set_caller(owner);
+        contract.set_compliance(new_compliance);
+
+        assert!(env.emitted_event(
+            &contract,
+            ComplianceUpdated {
+                new_compliance,
+            }
+        ));
     }
 }

@@ -7,8 +7,9 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-odra         = { version = "1.0", features = ["casper"] }
-odra-modules = { version = "1.0" }
+casper-types = { workspace = true }
+odra         = { workspace = true }
+odra-modules = { workspace = true }
 
 [dev-dependencies]
-odra-test = { version = "1.0" }
+odra-test = { workspace = true }

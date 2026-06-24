@@ -20,8 +20,8 @@
 extern crate alloc;
 
 use odra::prelude::*;
-use odra::{Address, Mapping, Var};
 use odra_modules::access::{Ownable, AccessControl};
+use odra::module::SubModule;
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
@@ -112,8 +112,8 @@ pub enum IdentityError {
 
 #[odra::module]
 pub struct IdentityRegistry {
-    ownable:        Ownable,
-    access_control: AccessControl,
+    ownable:        SubModule<Ownable>,
+    access_control: SubModule<AccessControl>,
     /// investor → Identity
     identities:     Mapping<Address, Identity>,
     /// (investor, topic) → Claim
@@ -137,8 +137,7 @@ impl IdentityRegistry {
         issuers_registry: Address,
         topics_registry:  Address,
     ) {
-        self.ownable.init(owner);
-        self.access_control.init(owner);
+        self.ownable.module_mut().init(owner);
         self.issuers_registry.set(issuers_registry);
         self.topics_registry.set(topics_registry);
     }
@@ -146,23 +145,23 @@ impl IdentityRegistry {
     // ── Agent role management ─────────────────────────────────────────────────
 
     pub fn grant_identity_agent(&mut self, agent: Address) {
-        self.ownable.assert_owner(&self.env().caller());
-        self.access_control.grant_role(&ROLE_IDENTITY_AGENT, &agent);
+        self.ownable.module().assert_owner(&self.env().caller());
+        self.access_control.module_mut().grant_role(&ROLE_IDENTITY_AGENT, &agent);
     }
 
     pub fn grant_claim_agent(&mut self, agent: Address) {
-        self.ownable.assert_owner(&self.env().caller());
-        self.access_control.grant_role(&ROLE_CLAIM_AGENT, &agent);
+        self.ownable.module().assert_owner(&self.env().caller());
+        self.access_control.module_mut().grant_role(&ROLE_CLAIM_AGENT, &agent);
     }
 
     pub fn revoke_identity_agent(&mut self, agent: Address) {
-        self.ownable.assert_owner(&self.env().caller());
-        self.access_control.revoke_role(&ROLE_IDENTITY_AGENT, &agent);
+        self.ownable.module().assert_owner(&self.env().caller());
+        self.access_control.module_mut().revoke_role(&ROLE_IDENTITY_AGENT, &agent);
     }
 
     pub fn revoke_claim_agent(&mut self, agent: Address) {
-        self.ownable.assert_owner(&self.env().caller());
-        self.access_control.revoke_role(&ROLE_CLAIM_AGENT, &agent);
+        self.ownable.module().assert_owner(&self.env().caller());
+        self.access_control.module_mut().revoke_role(&ROLE_CLAIM_AGENT, &agent);
     }
 
     // ── Identity CRUD ─────────────────────────────────────────────────────────
@@ -274,7 +273,7 @@ impl IdentityRegistry {
             Some(id) if id.active => id,
             _ => return false,
         };
-        let now = self.env().block_time();
+        let now = self.env().get_block_time();
 
         for topic in required_topics.iter() {
             match self.claims.get(&(investor, *topic)) {
@@ -308,23 +307,23 @@ impl IdentityRegistry {
     }
 
     pub fn owner(&self) -> Address {
-        self.ownable.get_owner()
+        self.ownable.module().get_owner()
     }
 
     pub fn issuers_registry(&self) -> Address {
-        self.issuers_registry.get_or_default()
+        self.issuers_registry.get().unwrap()
     }
 
     pub fn topics_registry(&self) -> Address {
-        self.topics_registry.get_or_default()
+        self.topics_registry.get().unwrap()
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
     fn assert_identity_agent(&self) {
         let caller = self.env().caller();
-        let is_owner  = self.ownable.get_owner() == caller;
-        let has_role  = self.access_control.has_role(&ROLE_IDENTITY_AGENT, &caller);
+        let is_owner  = self.ownable.module().get_owner() == caller;
+        let has_role  = self.access_control.module().has_role(&ROLE_IDENTITY_AGENT, &caller);
         if !is_owner && !has_role {
             self.env().revert(IdentityError::Unauthorized);
         }
@@ -332,8 +331,8 @@ impl IdentityRegistry {
 
     fn assert_claim_agent(&self) {
         let caller = self.env().caller();
-        let is_owner  = self.ownable.get_owner() == caller;
-        let has_role  = self.access_control.has_role(&ROLE_CLAIM_AGENT, &caller);
+        let is_owner  = self.ownable.module().get_owner() == caller;
+        let has_role  = self.access_control.module().has_role(&ROLE_CLAIM_AGENT, &caller);
         if !is_owner && !has_role {
             self.env().revert(IdentityError::Unauthorized);
         }

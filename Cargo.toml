@@ -1,18 +1,9 @@
-[package]
-name    = "casper-rwa-suite"
-version = "0.1.0"
-edition = "2021"
-authors = ["Victor Ezealor vic.ezealor@gmail.com"]
-description = "ERC-3643-compliant tokenised PE/VC security token suite on Casper Network"
-license = "MIT"
+# Casper RWA Suite - ERC-3643 Tokenization Project
+# ERC-3643-compliant tokenised PE/VC security token suite on Casper Network
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
-# ─── Workspace members ────────────────────────────────────────────────────────
 [workspace]
+resolver = "2"
 members = [
-    ".",
     "modules/identity-registry",
     "modules/claim-topics-registry",
     "modules/trusted-issuers-registry",
@@ -23,15 +14,11 @@ members = [
 ]
 
 [workspace.dependencies]
-odra        = { version = "1.0", features = ["casper"] }
-odra-modules = { version = "1.0" }
-
-[dependencies]
-odra        = { workspace = true }
-odra-modules = { workspace = true }
-
-[dev-dependencies]
-odra-test = { version = "1.0" }
+odra        = { version = "2.8" }
+odra-modules = { version = "2.8" }
+odra-test   = { version = "2.8" }
+casper-event-standard = "0.7"
+casper-types = "6.1"
 
 [profile.release]
 codegen-units = 1
