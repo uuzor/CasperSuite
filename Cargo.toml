@@ -2,6 +2,7 @@
 # ERC-3643-compliant tokenised PE/VC security token suite on Casper Network
 
 [workspace]
+resolver = "2"
 members = [
     "modules/identity-registry",
     "modules/claim-topics-registry",

@@ -13,3 +13,4 @@ odra-modules = { workspace = true }
 
 [dev-dependencies]
 odra-test = { workspace = true }
+odra = { workspace = true }
