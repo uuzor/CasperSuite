@@ -2,7 +2,7 @@
 name    = "casper-rwa-suite"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <you@example.com>"]
+authors = ["Victor Ezealor vic.ezealor@gmail.com"]
 description = "ERC-3643-compliant tokenised PE/VC security token suite on Casper Network"
 license = "MIT"
 
