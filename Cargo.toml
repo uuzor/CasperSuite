@@ -1,0 +1,39 @@
+[package]
+name    = "casper-rwa-suite"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <you@example.com>"]
+description = "ERC-3643-compliant tokenised PE/VC security token suite on Casper Network"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# ─── Workspace members ────────────────────────────────────────────────────────
+[workspace]
+members = [
+    ".",
+    "modules/identity-registry",
+    "modules/claim-topics-registry",
+    "modules/trusted-issuers-registry",
+    "modules/compliance",
+    "modules/security-token",
+    "modules/fund-token",
+    "modules/governance",
+]
+
+[workspace.dependencies]
+odra        = { version = "1.0", features = ["casper"] }
+odra-modules = { version = "1.0" }
+
+[dependencies]
+odra        = { workspace = true }
+odra-modules = { workspace = true }
+
+[dev-dependencies]
+odra-test = { version = "1.0" }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto         = true
