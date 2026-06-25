@@ -1,0 +1,28 @@
+[package]
+name = "deployer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+odra = "2.8"
+odra-casper-livenet-env = { version = "2.8", optional = true }
+claim-topics-registry = { path = "../../modules/claim-topics-registry" }
+trusted-issuers-registry = { path = "../../modules/trusted-issuers-registry" }
+identity-registry = { path = "../../modules/identity-registry" }
+compliance = { path = "../../modules/compliance" }
+security-token = { path = "../../modules/security-token" }
+fund-token = { path = "../../modules/fund-token" }
+governance = { path = "../../modules/governance" }
+
+[features]
+default = []
+livenet = [
+    "odra-casper-livenet-env",
+    "claim-topics-registry/livenet",
+    "trusted-issuers-registry/livenet",
+    "identity-registry/livenet",
+    "compliance/livenet",
+    "security-token/livenet",
+    "fund-token/livenet",
+    "governance/livenet",
+]

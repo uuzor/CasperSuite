@@ -7,9 +7,13 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+odra-casper-livenet-env = { workspace = true, optional = true }
 odra         = { workspace = true }
 odra-modules = { workspace = true }
 casper-types = { workspace = true }
 
 [dev-dependencies]
 odra-test = { workspace = true }
+
+[features]
+livenet = ["odra-casper-livenet-env"]
