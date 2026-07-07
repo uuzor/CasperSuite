@@ -1,0 +1,26 @@
+[package]
+name = "fund"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[test]]
+name = "tests"
+path = "tests.rs"
+
+[dependencies]
+odra-casper-livenet-env = { workspace = true, optional = true }
+odra         = { workspace = true }
+odra-modules = { workspace = true }
+casper-types = { workspace = true }
+
+[build-dependencies]
+odra-build = { workspace = true }
+
+[dev-dependencies]
+odra-test = { workspace = true }
+
+[features]
+livenet = ["odra-casper-livenet-env"]

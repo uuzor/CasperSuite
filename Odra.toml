@@ -1,22 +1,5 @@
-# Odra configuration for Casper RWA Suite
+# Odra configuration for Agentic RWA Fund
 
 [[contracts]]
-fqn = "security_token::SecurityToken"
-
-[[contracts]]
-fqn = "identity_registry::IdentityRegistry"
-
-[[contracts]]
-fqn = "compliance::Compliance"
-
-[[contracts]]
-fqn = "claim_topics_registry::ClaimTopicsRegistry"
-
-[[contracts]]
-fqn = "trusted_issuers_registry::TrustedIssuersRegistry"
-
-[[contracts]]
-fqn = "fund_token::FundToken"
-
-[[contracts]]
-fqn = "governance::Governance"
+fqn = "fund::Fund"
+build-crate = "modules/fund"

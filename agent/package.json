@@ -1,0 +1,21 @@
+{
+  "name": "casper-rwa-agent",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "LangChain Agent for RWA Fund - Casper + Dinari",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "agent": "node src/agent.js"
+  },
+  "dependencies": {
+    "@dinari/api-sdk": "^0.14.0",
+    "@langchain/core": "^0.3.80",
+    "dotenv": "^16.6.1",
+    "ethers": "^6.17.0",
+    "langchain": "^0.3.37",
+    "openai": "^6.45.0",
+    "viem": "^2.54.3"
+  }
+}

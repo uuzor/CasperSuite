@@ -1,19 +1,10 @@
-# Casper RWA Suite - ERC-3643 Tokenization Project
-# ERC-3643-compliant tokenised PE/VC security token suite on Casper Network
+# Casper RWA Suite - Agentic RWA Fund
+# Casper Fund Contract + Base Treasury (Dinari Integration)
 
 [workspace]
 resolver = "2"
 members = [
-    "modules/identity-registry",
-    "modules/claim-topics-registry",
-    "modules/trusted-issuers-registry",
-    "modules/compliance",
-    "modules/security-token",
-    "modules/fund-token",
-    "modules/governance",
-    "crates/deployer",
-    "crates/build_contract",
-    "crates/wasm-builder",
+    "modules/fund",
 ]
 
 [workspace.dependencies]
